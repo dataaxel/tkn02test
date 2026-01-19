@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<!-- Gemini-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentiment Analysis with TFJS</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #container { max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        textarea { width: 100%; height: 100px; margin-bottom: 10px; padding: 10px; box-sizing: border-box; }
+        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        #result { margin-top: 20px; font-weight: bold; }
+        .positive { color: green; }
+        .neutral { color: gray; }
+        .negative { color: red; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>Sentiment Analysis (TFJS)</h1>
+        <p>Enter text to classify its sentiment (Positive/Neutral/Negative).</p>
+        <textarea id="inputText" placeholder="Write your text here..."></textarea>
+        <button id="predictButton">Analyze Sentiment</button>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        let model;
+        let tokenizer;
+        const MAX_LEN = 20; // Must match your Python MAX_LEN
+        const OOV_TOKEN = "<OOV>"; // Must match your Python OOV_TOKEN
+        const labels = ["Negativ", "Neutral", "Positiv"];
+
+        async function loadModelAndTokenizer() {
+            try {
+                // Load the TensorFlow.js model
+                model = await tf.loadLayersModel('tfjs_model/model.json');
+                console.log('Model loaded successfully!');
+
+                // Load the tokenizer.json
+                const response = await fetch('tfjs_model/tokenizer.json');
+                tokenizer = await response.json();
+                console.log('Tokenizer loaded successfully!');
+
+                document.getElementById('predictButton').disabled = false;
+            } catch (error) {
+                console.error('Error loading model or tokenizer:', error);
+                document.getElementById('result').innerText = 'Error loading resources.';
+            }
+        }
+
+        function preprocessText(text) {
+            const words = text.toLowerCase().split(/\s+/).filter(word => word.length > 0);
+            const sequence = words.map(word => {
+                const index = tokenizer.word_index[word];
+                return index !== undefined ? index : tokenizer.word_index[OOV_TOKEN];
+            });
+
+            // Padding (pre-padding as in Python code)
+            let paddedSequence = [];
+            if (sequence.length < MAX_LEN) {
+                paddedSequence = Array(MAX_LEN - sequence.length).fill(0).concat(sequence);
+            } else {
+                paddedSequence = sequence.slice(sequence.length - MAX_LEN);
+            }
+
+            // Create a tensor with dtype 'int32'
+            return tf.tensor2d([paddedSequence], [1, MAX_LEN], 'int32');
+        }
+
+        async function predictSentiment() {
+            const inputText = document.getElementById('inputText').value;
+            if (!inputText) {
+                document.getElementById('result').innerText = 'Please enter some text.';
+                return;
+            }
+
+            document.getElementById('result').innerText = 'Analyzing...';
+
+            const processedInput = preprocessText(inputText);
+            
+            // Make prediction
+            const prediction = model.predict(processedInput);
+            const probabilities = prediction.dataSync(); // Get probabilities as a JavaScript array
+
+            const predictedIndex = tf.argMax(prediction, 1).dataSync()[0];
+            const predictedLabel = labels[predictedIndex];
+
+            let resultClass = '';
+            if (predictedLabel === 'Positiv') resultClass = 'positive';
+            else if (predictedLabel === 'Neutral') resultClass = 'neutral';
+            else if (predictedLabel === 'Negativ') resultClass = 'negative';
+
+            document.getElementById('result').innerHTML = `
+                Prediction: <span class="${resultClass}">${predictedLabel}</span><br>
+                Probabilities: Negativ: ${probabilities[0].toFixed(2)}, Neutral: ${probabilities[1].toFixed(2)}, Positiv: ${probabilities[2].toFixed(2)}
+            `;
+
+            // Clean up tensor memory
+            processedInput.dispose();
+            prediction.dispose();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('predictButton').disabled = true;
+            loadModelAndTokenizer();
+            document.getElementById('predictButton').addEventListener('click', predictSentiment);
+        });
+    </script>
+</body>
+</html>
